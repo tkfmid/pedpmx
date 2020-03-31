@@ -115,22 +115,21 @@ body <- dashboardBody(
                          radioButtons("dosetype", label = "Dosing Type", choices = c("Fixed", "WT-based"), selected = "WT-based", inline = TRUE),
                          selectizeInput("adose", "Dose Amount for Adults", choices = 100, selected = 100, multiple = FALSE, options = list(create = TRUE)),
                          selectizeInput("dose", "Dose Amount for Pediatrics", choices = 100, selected = 100, multiple = TRUE, options = list(create = TRUE)),
-                         sliderInput("agerange", label = "Age Range", min = 2, max = 18, value = c(0, 18)),
+                         sliderInput("agerange", label = "Age Range", min = 0, max = 18, value = c(2, 18)),
                          selectizeInput("age", "Age Cutpoint", choices = c(6, 12), selected = c(6, 12), multiple = TRUE, options = list(create = TRUE)),
-                         selectizeInput("wt", "Weight Cutpoint", choices = c(10, 20, 30), selected = c(10, 20, 30), multiple = TRUE, options = list(create = TRUE)),
+                         selectizeInput("wt", "Weight Cutpoint", choices = c(20, 30, 40), selected = c(20, 30, 40), multiple = TRUE, options = list(create = TRUE)),
                          conditionalPanel(condition = "input.route == 'iv'",
                                           numericInput("tinf", label = "Infusion Time", value = 0)),
                          numericInput("ii", label = "Dosing Interval", value = 24)
                 ),
                 tabPanel("Tab2",
-                         conditionalPanel(condition = "input.cmt == '1cmt' & input.route == 'iv'",
-                                          selectizeInput("theta", "Theta (CL, V1)", choices = NULL, multiple = TRUE, options = list(create = TRUE))),
-                         conditionalPanel(condition = "input.cmt == '1cmt' & input.route == 'sc/oral'",
-                                          selectizeInput("theta", "Theta (CL, V1, KA)", choices = NULL, multiple = TRUE, options = list(create = TRUE))),
-                         conditionalPanel(condition = "input.cmt == '2cmt' & input.route == 'iv'",
-                                          selectizeInput("theta", "Theta (CL, V1, Q, V2)", choices = NULL, multiple = TRUE, options = list(create = TRUE))),
-                         conditionalPanel(condition = "input.cmt == '2cmt' & input.route == 'sc/oral'",
-                                          selectizeInput("theta", "Theta (CL, V1, Q, V2, KA)", choices = NULL, multiple = TRUE, options = list(create = TRUE))),
+                         numericInput("cl", "Theta (CL)", value = 1),
+                         numericInput("vc", "Theta (VC)", value = 20),
+                         conditionalPanel(condition = "input.cmt == '2cmt'",
+                                          numericInput("q", "Theta (Q)", value = 2),
+                                          numericInput("vp", "Theta (VP)", value = 10)),
+                         conditionalPanel(condition = "input.route == 'sc/oral'",
+                                          numericInput("ka", "Theta (KA)", value = 1)),
                          radioButtons("omegatype", label = "Omega Structure", choices = c("Diag", "Block"), selected = "Diag", inline = TRUE),
                          selectizeInput("omega", "Omega", choices = NULL, multiple = TRUE, options = list(create = TRUE))
                 ),
@@ -139,13 +138,13 @@ body <- dashboardBody(
               ),
               tabBox(
                 width = 8,
-                tabPanel("Tab1", plotlyOutput("plot1", height = 700)),
+                tabPanel("Tab1", plotlyOutput("plot1", height = 700, width = "95%")),
                 tabPanel("Tab2", DTOutput("tbl")),
                 tabPanel("Tab3", 
                          checkboxInput("log", label = "Log?", value = FALSE),
-                         plotlyOutput("pkplot", height = 700)),
-                tabPanel("Tab4", plotlyOutput("pkbxpwt", height = 700)),
-                tabPanel("Tab5", plotlyOutput("pkbxpage", height = 700))
+                         plotlyOutput("pkplot", height = 700, width = "95%")),
+                tabPanel("Tab4", plotlyOutput("pkbxpwt", height = 700, width = "95%")),
+                tabPanel("Tab5", plotlyOutput("pkbxpage", height = 700, width = "95%"))
               )
               )
             ),
@@ -228,8 +227,14 @@ server <- function(input, output) {
              id2 = rep(1:Nsubj, each = 2)) %>% 
       left_join(nhanes_adults)
     
+    mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc)
     
     if(input$cmt == "1cmt") mod <- mod %>% param(Q = 0)
+    
+    if(input$cmt == "2cmt") mod <- mod %>% param(Q = input$q, VP = input$VP)
+
+    if(input$route == "sc/oral") mod <- mod %>% param(KA1 = input$ka)
+    
     
     if(input$dosetype == "WT-based") {
       data <- data %>% mutate(amt = amt * WT)
