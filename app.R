@@ -3,7 +3,7 @@ library(shiny)
 library(shinydashboard)
 # install.packages("shinyMatrix", lib = "~/R_packages")
 # library(shinyMatrix, lib.loc = "../R_packages")
-library(shinyMatrix)
+# library(shinyMatrix)
 library(tidyverse)
 library(plotly)
 library(ggpubr)
@@ -17,35 +17,36 @@ theme_set(theme_pubr(base_size = 10))
 
 
 modelcode <- "
-Model file:  mod.cpp 
+Model file:  pk2cmt.cpp 
 $PROB
-# Model: `mod`
-- Two-compartment PK model
-- Dual first-order absorption
-- Optional nonlinear clearance from `CENT`
-- Source: `mrgsolve` internal library
-- Date: `r Sys.Date()`
+# Model: `pk2cmt`
+  - Two-compartment PK model
+  - Dual first-order absorption
+  - Optional nonlinear clearance from `CENT`
+  - Source: `mrgsolve` internal library
+  - Date: `r Sys.Date()`
+  - Version: `r packageVersion(mrgsolve)`
   
-$PARAM @annotated
-TVCL   :  1  : Clearance (volume/time)
-TVVC   : 20  : Central volume (volume)
-Q    :  2  : Inter-compartmental clearance (volume/time)
-VP   : 10  : Peripheral volume of distribution (volume)
-KA1  :  1  : Absorption rate constant 1 (1/time)
-KA2  :  1  : Absorption rate constant 2 (1/time)
-VMAX :  0  : Maximum velocity (mass/time)
-KM   :  2  : Michaelis Constant (mass/volume)
-WT   :  70  : Body weight
-CL_WT   :  0.75  : Power exponent
-VC_WT   :  0.75  : Power exponent
-WTref   :  70  : Reference WT
-
-$CMT  @annotated
-EV1    : First extravascular compartment (mass)
-CENT   : Central compartment (mass)
-PERIPH : Peripheral compartment (mass) 
-EV2    : Second extravascular compartment (mass)
-AUC    : Dummy AUC compartment
+  $PARAM @annotated
+  TVCL   :  1  : Clearance (volume/time)
+  TVVC   : 20  : Central volume (volume)
+  TVQ    :  2  : Inter-compartmental clearance (volume/time)
+  TVVP   : 10  : Peripheral volume of distribution (volume)
+  TVKA1  :  1  : Absorption rate constant 1 (1/time)
+  KA2  :  1  : Absorption rate constant 2 (1/time)
+  VMAX :  0  : Maximum velocity (mass/time)
+  KM   :  2  : Michaelis Constant (mass/volume)
+  WT   :  70  : Body weight
+  CL_WT   :  0.75  : Power exponent
+  VC_WT   :  0.75  : Power exponent
+  WTref   :  70  : Reference WT
+  
+  $CMT  @annotated
+  EV1    : First extravascular compartment (mass)
+  CENT   : Central compartment (mass)
+  PERIPH : Peripheral compartment (mass) 
+  EV2    : Second extravascular compartment (mass)
+  AUC    : Dummy AUC compartment
   
 $GLOBAL 
 #define CP (CENT/VC)
@@ -55,10 +56,16 @@ $GLOBAL
 $MAIN
 double CL = TVCL * pow(WT / WTref, CL_WT) * exp(ECL);
 double VC = TVVC * pow(WT / WTref, VC_WT) * exp(EVC);
+double Q = TVQ * exp(EQ);
+double VP = TVVP * exp(EVP);
+double KA1 = TVKA1 * exp(EKA1);
 
 $OMEGA @annotated @block
-ECL: 0: ETA on clearance
-EVC: 0 0 : ETA on volume
+  ECL : 0.2: ETA on clearance
+  EVC : 0 0.2 : ETA on volume
+  EQ  : 0 0 0.2: ETA on volume
+  EVP : 0 0 0 0.2: ETA on volume
+  EKA1: 0 0 0 0 0.2: ETA on volume
   
 $ODE
 dxdt_EV1 = -KA1*EV1;
@@ -68,8 +75,8 @@ dxdt_PERIPH = Q*CP - Q*CT;
 dxdt_AUC = CP;
 
 $CAPTURE  @annotated
-CP : Plasma concentration (mass/time)
-AUC : AUC
+  CP : Plasma concentration (mass/time)
+  AUC : AUC
 "
 
 
@@ -86,8 +93,15 @@ AUC : AUC
 # input$wt = choices = c(10, 20, 30)
 # input$theta = NULL
 # input$omegatype = "Diag"
-# input$omega = NULL
+# input$omega = "0.2,0.2,0.2,0.2,0.2"
+# input$omega = "0.2,0.2,0.2,0.2,0.2"
 # input$modelcode = modelcode
+# input$cl = 1
+# input$vc = 20
+# input$q = 2
+# input$vp = 10
+# input$ka = 1
+
 
 header <- dashboardHeader()
 
@@ -130,8 +144,11 @@ body <- dashboardBody(
                                           numericInput("vp", "Theta (VP)", value = 10)),
                          conditionalPanel(condition = "input.route == 'sc/oral'",
                                           numericInput("ka", "Theta (KA)", value = 1)),
-                         radioButtons("omegatype", label = "Omega Structure", choices = c("Diag", "Block"), selected = "Diag", inline = TRUE),
-                         selectizeInput("omega", "Omega", choices = NULL, multiple = TRUE, options = list(create = TRUE))
+                         radioButtons("omegatype", label = "Omega Structure", choices = c("Diag", "Block", "Zero"), selected = "Block", inline = TRUE),
+                         conditionalPanel(condition = "input.omegatype == 'Diag'",
+                                          textInput("omega", "Omega (comma delimited)", value = "0.2, 0.2, 0.2, 0.2, 0.2")),
+                         conditionalPanel(condition = "input.omegatype == 'Block'",
+                                          textInput("omegab", "Omega (comma delimited)", value = "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2"))
                 ),
                 tabPanel("Tab3",
                          textAreaInput("modelcode", "Mrgsolve model text", value = modelcode, width = "600px"))
@@ -195,6 +212,8 @@ server <- function(input, output) {
   
   re_simdf <- reactive({
     mod <- mcode("mod", input$modelcode)
+    # mod <- mread("mod", file = "./model/pk2cmt2.cpp")
+    
     Nsubj <- 500
     
     nhanes_filtered <- nhanes %>% 
@@ -229,11 +248,19 @@ server <- function(input, output) {
     
     mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc)
     
-    if(input$cmt == "1cmt") mod <- mod %>% param(Q = 0)
+    if(input$cmt == "1cmt") mod <- mod %>% param(TVQ = 0)
     
-    if(input$cmt == "2cmt") mod <- mod %>% param(Q = input$q, VP = input$VP)
+    if(input$cmt == "2cmt") mod <- mod %>% param(TVQ = input$q, TVVP = input$vp)
 
-    if(input$route == "sc/oral") mod <- mod %>% param(KA1 = input$ka)
+    if(input$route == "sc/oral") mod <- mod %>% param(TVKA1 = input$ka)
+    
+    omega_vec <- as.numeric(unlist(strsplit(input$omega,",")))
+    omegab_vec <- as.numeric(unlist(strsplit(input$omegab,",")))
+    if(input$omegatype == "Zero") mod <- mod %>% zero_re()
+    if(input$omegatype == "Diag") mod <- mod %>% omat(dmat(omega_vec))
+    if(input$omegatype == "Block") mod <- mod %>% omat(cmat(omegab_vec))
+
+      
     
     
     if(input$dosetype == "WT-based") {
@@ -243,8 +270,6 @@ server <- function(input, output) {
     
     
     simdf_peds <- mod %>%
-      omat(cmat(0.2, 
-                0.6, 0.2)) %>%
       data_set(data) %>%
       Req(CP, AUC) %>%
       carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2) %>% 
@@ -255,8 +280,6 @@ server <- function(input, output) {
                           `1` = "Steady-State"),
              pop = "peds")
     simdf_adults <- mod %>%
-      omat(cmat(0.2, 
-                0.6, 0.2)) %>%
       data_set(data_adults) %>%
       Req(CP, AUC) %>%
       carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2) %>% 
@@ -299,7 +322,7 @@ server <- function(input, output) {
   re_sumpk <- reactive({
     re_sumpk <- re_simdf() %>% 
       filter(pop == "peds") %>% 
-      filter(!(time ==  0 & cmt == 0) & time <= input$ii ) %>% 
+      filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
       mutate(WT = cut2(WT, cuts = as.numeric(input$wt)),
              AGE = cut2(AGE, cuts = as.numeric(input$age))) %>% 
       group_by(pop, ID, WT, AGE, ss2) %>% 
@@ -315,7 +338,7 @@ server <- function(input, output) {
   re_sumpk_adults <- reactive({
     re_sumpk_adults <- re_simdf() %>% 
       filter(pop == "adults") %>% 
-      filter(!(time ==  0 & cmt == 0) & time <= input$ii ) %>% 
+      filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
       group_by(pop, ID, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
