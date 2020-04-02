@@ -114,7 +114,9 @@ header <- dashboardHeader(title = "PEDEX Dashboard")
 
 sidebar <- dashboardSidebar(
   sidebarMenu(
-    menuItem("PK Dashboard", tabName = "pkdashboard", icon = icon("dashboard"))
+    menuItem("PK Dashboard", tabName = "pkdashboard", icon = icon("dashboard")),
+    menuItem("Source code", icon = icon("file-code-o"), 
+             href = "https://github.com/tkfmid/pedpmx")
     # menuItem("Widgets", icon = icon("th"), tabName = "widgets",
     #          badgeLabel = "new", badgeColor = "green")
   )
