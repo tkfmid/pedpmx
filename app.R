@@ -92,9 +92,9 @@ $CAPTURE  @annotated
 # input$age = c(6, 12, 18)
 # input$wt = choices = c(10, 20, 30)
 # input$theta = NULL
-# input$omegatype = "Diag"
+# input$omegatype = "Block"
 # input$omega = "0.2,0.2,0.2,0.2,0.2"
-# input$omega = "0.2,0.2,0.2,0.2,0.2"
+# input$omegab = "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2"
 # input$modelcode = modelcode
 # input$cl = 1
 # input$vc = 20
@@ -323,9 +323,9 @@ server <- function(input, output) {
     re_sumpk <- re_simdf() %>% 
       filter(pop == "peds") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      mutate(WT = cut2(WT, cuts = as.numeric(input$wt)),
-             AGE = cut2(AGE, cuts = as.numeric(input$age))) %>% 
-      group_by(pop, ID, WT, AGE, ss2) %>% 
+      mutate(WTC = cut2(WT, cuts = as.numeric(input$wt)),
+             AGEC = cut2(AGE, cuts = as.numeric(input$age))) %>% 
+      group_by(pop, ID, WT, AGE, WTC, AGEC, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
                 Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])) %>% 
@@ -339,7 +339,7 @@ server <- function(input, output) {
     re_sumpk_adults <- re_simdf() %>% 
       filter(pop == "adults") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      group_by(pop, ID, ss2) %>% 
+      group_by(pop, ID, WT, AGE, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
                 Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])) %>% 
@@ -364,8 +364,8 @@ server <- function(input, output) {
     p <- re_sumpk() %>% 
       bind_rows(re_sumpk_adults()) %>% 
       ungroup() %>% 
-      mutate(`Body Weight` = ifelse(pop == "peds", as.character(WT), "Adults"),
-             `Body Weight` = factor(`Body Weight`, levels = c(levels(WT), "Adults"))) %>% 
+      mutate(`Body Weight` = ifelse(pop == "peds", as.character(WTC), "Adults"),
+             `Body Weight` = factor(`Body Weight`, levels = c(levels(WTC), "Adults"))) %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
       geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
@@ -391,8 +391,8 @@ server <- function(input, output) {
     p <- re_sumpk() %>% 
       bind_rows(re_sumpk_adults()) %>% 
       ungroup() %>% 
-      mutate(Age = ifelse(pop == "peds", as.character(AGE), "Adults"),
-             Age = factor(Age, levels = c(levels(AGE), "Adults"))) %>% 
+      mutate(Age = ifelse(pop == "peds", as.character(AGEC), "Adults"),
+             Age = factor(Age, levels = c(levels(AGEC), "Adults"))) %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
       geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
