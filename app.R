@@ -15,6 +15,12 @@ library(Hmisc)
 library(DT)
 theme_set(theme_pubr(base_size = 10))
 
+layout_ggplotly <- function(gg, x = -0.02, y = -0.08){
+  # The 1 and 2 goes into the list that contains the options for the x and y axis labels respectively
+  gg[['x']][['layout']][['annotations']][[1]][['y']] <- x
+  gg[['x']][['layout']][['annotations']][[2]][['x']] <- y
+  gg
+}
 
 modelcode <- "
 Model file:  pk2cmt.cpp 
@@ -101,30 +107,31 @@ $CAPTURE  @annotated
 # input$q = 2
 # input$vp = 10
 # input$ka = 1
+# input$log = FALSE
 
 
-header <- dashboardHeader()
+header <- dashboardHeader(title = "PEDEX Dashboard")
 
 sidebar <- dashboardSidebar(
   sidebarMenu(
-    menuItem("Dashboard", tabName = "dashboard", icon = icon("dashboard")),
-    menuItem("Widgets", icon = icon("th"), tabName = "widgets",
-             badgeLabel = "new", badgeColor = "green")
+    menuItem("PK Dashboard", tabName = "pkdashboard", icon = icon("dashboard"))
+    # menuItem("Widgets", icon = icon("th"), tabName = "widgets",
+    #          badgeLabel = "new", badgeColor = "green")
   )
 )
 
 body <- dashboardBody(
   tabItems(
-    tabItem(tabName = "dashboard",
-            h2("Dashboard tab content"),
+    tabItem(tabName = "pkdashboard",
+            h2("PK Dashboard"),
             
             fluidRow(
               tabBox(
                 title = "Input",
                 # The id lets us use input$tabset1 on the server to find the current tab
                 id = "tabset1", width = 4,
-                tabPanel("Tab1",
-                         radioButtons("cmt", label = "Model", choices = c("1cmt", "2cmt"), selected = "1cmt", inline = TRUE),
+                tabPanel("Dosing",
+                         submitButton("Update", icon("refresh")),
                          radioButtons("route", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "iv", inline = TRUE),
                          radioButtons("dosetype", label = "Dosing Type", choices = c("Fixed", "WT-based"), selected = "WT-based", inline = TRUE),
                          selectizeInput("adose", "Dose Amount for Adults", choices = 100, selected = 100, multiple = FALSE, options = list(create = TRUE)),
@@ -136,7 +143,8 @@ body <- dashboardBody(
                                           numericInput("tinf", label = "Infusion Time", value = 0)),
                          numericInput("ii", label = "Dosing Interval", value = 24)
                 ),
-                tabPanel("Tab2",
+                tabPanel("PK Parameter",
+                         radioButtons("cmt", label = "Model", choices = c("1cmt", "2cmt"), selected = "1cmt", inline = TRUE),
                          numericInput("cl", "Theta (CL)", value = 1),
                          numericInput("vc", "Theta (VC)", value = 20),
                          conditionalPanel(condition = "input.cmt == '2cmt'",
@@ -150,18 +158,21 @@ body <- dashboardBody(
                          conditionalPanel(condition = "input.omegatype == 'Block'",
                                           textInput("omegab", "Omega (comma delimited)", value = "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2"))
                 ),
-                tabPanel("Tab3",
+                tabPanel("PK Model Code",
                          textAreaInput("modelcode", "Mrgsolve model text", value = modelcode, width = "600px"))
               ),
               tabBox(
                 width = 8,
-                tabPanel("Tab1", plotlyOutput("plot1", height = 700, width = "95%")),
-                tabPanel("Tab2", DTOutput("tbl")),
-                tabPanel("Tab3", 
+                # tabPanel("Resampling", plotlyOutput("plot1", height = 700, width = "95%")),
+                # tabPanel("Simulated Dataset", DTOutput("tbl")),
+                tabPanel("PK Profile by Weight", 
                          checkboxInput("log", label = "Log?", value = FALSE),
-                         plotlyOutput("pkplot", height = 700, width = "95%")),
-                tabPanel("Tab4", plotlyOutput("pkbxpwt", height = 700, width = "95%")),
-                tabPanel("Tab5", plotlyOutput("pkbxpage", height = 700, width = "95%"))
+                         plotlyOutput("pkwt", height = 700, width = "100%")),
+                tabPanel("PK Profile by Age",
+                         checkboxInput("log", label = "Log?", value = FALSE),
+                         plotlyOutput("pkage", height = 700, width = "100%")),
+                tabPanel("Exposure vs. Weight", plotlyOutput("pkbxpwt", height = 700, width = "100%")),
+                tabPanel("Exposure vs. Age", plotlyOutput("pkbxpage", height = 700, width = "100%"))
               )
               )
             ),
@@ -175,7 +186,7 @@ body <- dashboardBody(
 
 # Put them together into a dashboardPage
 ui <- dashboardPage(
-  dashboardHeader(title = "Simple tabs"),
+  header,
   sidebar,
   body
 )
@@ -200,15 +211,15 @@ server <- function(input, output) {
   nhanes <- left_join(nhanes_demo, nhanes_bmx) %>% 
     drop_na(WT, AGE)
   
-  output$plot1 <- renderPlotly({
-    ggplot(nhanes)+
-      geom_point(data = nhanes %>% filter(AGE >= input$agerange[1] & AGE <= input$agerange[2]), aes(AGE, WT, colour = "Selected age range"), alpha = 0.3)+
-      geom_point(data = nhanes %>% filter(AGE < input$agerange[1] | AGE > input$agerange[2]), aes(AGE, WT), alpha = 0.1)+
-      labs(x = "Age (year)", y = "Weight (kg)")+
-      scale_color_npg()+
-      theme(legend.title = element_blank())
-    
-    })
+  # output$plot1 <- renderPlotly({
+  #   ggplot(nhanes)+
+  #     geom_point(data = nhanes %>% filter(AGE >= input$agerange[1] & AGE <= input$agerange[2]), aes(AGE, WT, colour = "Selected age range"), alpha = 0.3)+
+  #     geom_point(data = nhanes %>% filter(AGE < input$agerange[1] | AGE > input$agerange[2]), aes(AGE, WT), alpha = 0.1)+
+  #     labs(x = "Age (year)", y = "Weight (kg)")+
+  #     scale_color_npg()+
+  #     theme(legend.title = element_blank())
+  #   
+  #   })
   
   re_simdf <- reactive({
     mod <- mcode("mod", input$modelcode)
@@ -289,42 +300,97 @@ server <- function(input, output) {
                           `0` = "First Dose",
                           `1` = "Steady-State"),
              pop = "adults")
+      
     
-    re_simdf <- bind_rows(simdf_peds, simdf_adults)
+    re_simdf <- bind_rows(simdf_peds, simdf_adults) %>% 
+      mutate(WTC = ifelse(pop == "peds", as.character(cut2(WT[pop == "peds"], cuts = as.numeric(input$wt))), "Adults"),
+             WTC = factor(WTC),
+             WTC = factor(WTC, levels = c(levels(WTC)[levels(WTC) != "Adults"], "Adults")),
+             AGEC = ifelse(pop == "peds", as.character(cut2(AGE[pop == "peds"], cuts = as.numeric(input$age))), "Adults"),
+             AGEC = factor(AGEC),
+             AGEC = factor(AGEC, levels = c(levels(AGEC)[levels(AGEC) != "Adults"], "Adults")))
+    
+    re_simdf
     
     })
   
-  output$tbl <- renderDT(
-    re_simdf() %>% filter(pop == "peds"), options = list(lengthChange = FALSE)
-  )
+  # output$tbl <- renderDT(
+  #   re_simdf() %>% filter(pop == "peds"), options = list(lengthChange = FALSE)
+  # )
   
-  output$pkplot <- renderPlotly({
-    p <- re_simdf() %>%
-      filter(pop == "peds") %>% 
-      group_by(ss2, time) %>% 
+  output$pkwt <- renderPlotly({
+    
+    conc_summary <- re_simdf() %>%
+      # filter(pop == "peds") %>% 
+      group_by(pop, ss2, time, WTC) %>% 
       summarise(conc_m = quantile(CP, probs = 0.5),
                 conc_l = quantile(CP, probs = 0.05),
                 conc_u = quantile(CP, probs = 0.95)) %>% 
       filter(!(ss2 == "Steady-State" & time == 0)) %>% 
-      ggplot()+
-      facet_wrap(~ss2)+
-      geom_ribbon(aes(x = time, ymax = conc_u, ymin = conc_l, fill = "90%PI"), alpha = 0.3, size = 1.2)+
-      geom_line(aes(time, conc_m, colour = "Median"), size = 1.2)+
+      ungroup() %>% 
+      arrange(WTC, ss2, time)
+    
+    conc_summary2 <- conc_summary %>% 
+      filter(pop == "peds") %>%
+      mutate(WTC2 = WTC) %>% 
+      bind_rows(conc_summary %>% 
+                  filter(pop == "adults") %>% 
+                  slice(rep(1:n(), times = length(input$wt) + 1))) %>% 
+      mutate(WTC2 = rep(WTC2[1:(n() / 2)], times = 2),
+             WTC = factor(WTC, levels = c("Adults", levels(WTC)[levels(WTC) != "Adults"])))
+
+    p <- ggplot(conc_summary2)+
+      facet_grid(ss2~WTC2)+
+      geom_ribbon(aes(x = time, ymax = conc_u, ymin = conc_l, colour = WTC, fill = WTC), alpha = 0.3)+
+      geom_line(aes(time, conc_m, colour = WTC, fill = WTC), size = 1.1)+
       # geom_point(aes(time, conc_m, colour = "Median"), alpha = 0.5, size = 1.2)+
-      labs(x = "Time", y = "Concentration")+
-      scale_color_npg()+
-      scale_fill_npg()+
-      theme(legend.title = element_blank())
+      labs(x = "Time", y = "Concentration", colour = "Body Weight", fill = "Body Weight")+
+      scale_color_manual(values = c("darkgrey", get_palette("npg", 4)))+
+      scale_fill_manual(values = c("darkgrey", get_palette("npg", 4)))
     if(input$log) p <- p + scale_y_log10()
-    ggplotly(p)
+    p <- ggplotly(p) %>% layout(margin = list(l = 100, b = 100))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
+  })
+  
+  
+  output$pkage <- renderPlotly({
+    
+    conc_summary <- re_simdf() %>%
+      # filter(pop == "peds") %>% 
+      group_by(pop, ss2, time, AGEC) %>% 
+      summarise(conc_m = quantile(CP, probs = 0.5),
+                conc_l = quantile(CP, probs = 0.05),
+                conc_u = quantile(CP, probs = 0.95)) %>% 
+      filter(!(ss2 == "Steady-State" & time == 0)) %>% 
+      ungroup() %>% 
+      arrange(AGEC, ss2, time)
+    
+    conc_summary2 <- conc_summary %>% 
+      filter(pop == "peds") %>%
+      mutate(AGEC2 = AGEC) %>% 
+      bind_rows(conc_summary %>% 
+                  filter(pop == "adults") %>% 
+                  slice(rep(1:n(), times = length(input$age) + 1))) %>% 
+      mutate(AGEC2 = rep(AGEC2[1:(n() / 2)], times = 2),
+             AGEC = factor(AGEC, levels = c("Adults", levels(AGEC)[levels(AGEC) != "Adults"])))
+    
+    p <- ggplot(conc_summary2)+
+      facet_grid(ss2~AGEC2)+
+      geom_ribbon(aes(x = time, ymax = conc_u, ymin = conc_l, colour = AGEC, fill = AGEC), alpha = 0.3)+
+      geom_line(aes(time, conc_m, colour = AGEC, fill = AGEC), size = 1.1)+
+      # geom_point(aes(time, conc_m, colour = "Median"), alpha = 0.5, size = 1.2)+
+      labs(x = "Time", y = "Concentration", colour = "Age", fill = "Age")+
+      scale_color_manual(values = c("darkgrey", get_palette("npg", 4)))+
+      scale_fill_manual(values = c("darkgrey", get_palette("npg", 4)))
+    if(input$log) p <- p + scale_y_log10()
+    p <- ggplotly(p) %>% layout(margin = list(l = 100, b = 100))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   
   re_sumpk <- reactive({
     re_sumpk <- re_simdf() %>% 
       filter(pop == "peds") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      mutate(WTC = cut2(WT, cuts = as.numeric(input$wt)),
-             AGEC = cut2(AGE, cuts = as.numeric(input$age))) %>% 
       group_by(pop, ID, WT, AGE, WTC, AGEC, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
@@ -339,7 +405,7 @@ server <- function(input, output) {
     re_sumpk_adults <- re_simdf() %>% 
       filter(pop == "adults") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      group_by(pop, ID, WT, AGE, ss2) %>% 
+      group_by(pop, ID, WT, AGE, WTC, AGEC, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
                 Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])) %>% 
@@ -364,20 +430,19 @@ server <- function(input, output) {
     p <- re_sumpk() %>% 
       bind_rows(re_sumpk_adults()) %>% 
       ungroup() %>% 
-      mutate(`Body Weight` = ifelse(pop == "peds", as.character(WTC), "Adults"),
-             `Body Weight` = factor(`Body Weight`, levels = c(levels(WTC), "Adults"))) %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
       geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
       geom_hline(data = pkstats_adults, aes(yintercept = P95), colour = "darkgrey", linetype = "dashed")+
       geom_hline(data = pkstats_adults, aes(yintercept = P05), colour = "darkgrey", linetype = "dashed")+
-      geom_violin(aes(`Body Weight`, value, colour = `Body Weight`, fill = `Body Weight`), width=1, alpha = 0.3)+
-      geom_boxplot(aes(`Body Weight`, value, colour = `Body Weight`, fill = `Body Weight`), width=0.1, alpha = 0.3)+
+      geom_violin(aes(WTC, value, colour = WTC, fill = WTC), width=1, alpha = 0.3)+
+      geom_boxplot(aes(WTC, value, colour = WTC, fill = WTC), width=0.1, alpha = 0.3)+
       scale_color_npg()+
       scale_fill_npg()+
-      labs(x = "Body Weight (kg)", y = "Exposure")
+      labs(x = "Body Weight (kg)", y = "Exposure", colour = "Body Weight", fill = "Body Weight")
       # theme(axis.text.x = element_text(angle = 45, hjust = 1))
-    ggplotly(p)
+    p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   
   output$pkbxpage <- renderPlotly({
@@ -391,20 +456,19 @@ server <- function(input, output) {
     p <- re_sumpk() %>% 
       bind_rows(re_sumpk_adults()) %>% 
       ungroup() %>% 
-      mutate(Age = ifelse(pop == "peds", as.character(AGEC), "Adults"),
-             Age = factor(Age, levels = c(levels(AGEC), "Adults"))) %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
       geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
       geom_hline(data = pkstats_adults, aes(yintercept = P95), colour = "darkgrey", linetype = "dashed")+
       geom_hline(data = pkstats_adults, aes(yintercept = P05), colour = "darkgrey", linetype = "dashed")+
-      geom_violin(aes(Age, value, colour = Age, fill = Age), width=1, alpha = 0.3)+
-      geom_boxplot(aes(Age, value, colour = Age, fill = Age), width=0.1, alpha = 0.3)+
+      geom_violin(aes(AGEC, value, colour = AGEC, fill = AGEC), width=1, alpha = 0.3)+
+      geom_boxplot(aes(AGEC, value, colour = AGEC, fill = AGEC), width=0.1, alpha = 0.3)+
       scale_color_npg()+
       scale_fill_npg()+
-      labs(x = "Age (year)", y = "Exposure")
+      labs(x = "Age (year)", y = "Exposure", colour = "Age", fill = "Age")
       # theme(axis.text.x = element_text(angle = 45, hjust = 1))
-      ggplotly(p)
+    p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   
   
