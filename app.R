@@ -134,10 +134,12 @@ body <- dashboardBody(
                 id = "tabset1", width = 4,
                 tabPanel("Dosing",
                          submitButton("Update", icon("refresh")),
-                         radioButtons("route", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "iv", inline = TRUE),
-                         radioButtons("dosetype", label = "Dosing Type", choices = c("Fixed", "WT-based"), selected = "WT-based", inline = TRUE),
-                         selectizeInput("adose", "Dose Amount for Adults", choices = 100, selected = 100, multiple = FALSE, options = list(create = TRUE)),
-                         selectizeInput("dose", "Dose Amount for Pediatrics", choices = 100, selected = 100, multiple = TRUE, options = list(create = TRUE)),
+                         radioButtons("route", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "sc/oral", inline = TRUE),
+                         radioButtons("dosetype", label = "Dosing Type", choices = c("Fixed", "WT-based"), selected = "Fixed", inline = TRUE),
+                         selectizeInput("adose", "Dose Amount for Adults", 
+                                        choices = 125, selected = 125, multiple = FALSE, options = list(create = TRUE)),
+                         selectizeInput("dose", "Dose Amount for Pediatrics [Option 1. Single dose level for all WT tiers, Option 2. Different dose levels for each WT tier (the number of dose levels should match the number of WT tiers)]", 
+                                        choices = c(50, 75, 100, 125), selected = c(50, 75, 100, 125), multiple = TRUE, options = list(create = TRUE)),
                          sliderInput("agerange", label = "Age Range", min = 0, max = 18, value = c(2, 18)),
                          selectizeInput("age", "Age Cutpoint", choices = c(6, 12), selected = c(6, 12), multiple = TRUE, options = list(create = TRUE)),
                          selectizeInput("wt", "Weight Cutpoint", choices = c(20, 30, 40), selected = c(20, 30, 40), multiple = TRUE, options = list(create = TRUE)),
@@ -146,6 +148,7 @@ body <- dashboardBody(
                          numericInput("ii", label = "Dosing Interval", value = 24)
                 ),
                 tabPanel("PK Parameter",
+                         submitButton("Update", icon("refresh")),
                          radioButtons("cmt", label = "Model", choices = c("1cmt", "2cmt"), selected = "1cmt", inline = TRUE),
                          numericInput("cl", "Theta (CL)", value = 1),
                          numericInput("vc", "Theta (VC)", value = 20),
@@ -161,7 +164,8 @@ body <- dashboardBody(
                                           textInput("omegab", "Omega (comma delimited)", value = "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2"))
                 ),
                 tabPanel("PK Model Code",
-                         textAreaInput("modelcode", "Mrgsolve model text", value = modelcode, width = "600px"))
+                         submitButton("Update", icon("refresh")),
+                         textAreaInput("modelcode", "Mrgsolve model text", value = modelcode))
               ),
               tabBox(
                 width = 8,
