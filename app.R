@@ -1,7 +1,7 @@
 
 library(shiny)
 library(shinydashboard)
-# install.packages("shinyMatrix", lib = "~/R_packages")
+# install.packages("tidyverse", lib = "~/R_packages")
 # library(shinyMatrix, lib.loc = "../R_packages")
 # library(shinyMatrix)
 library(tidyverse)
@@ -13,6 +13,7 @@ library(foreign)
 library(mrgsolve)
 library(Hmisc)
 library(DT)
+library(furrr)
 theme_set(theme_pubr(base_size = 10))
 
 layout_ggplotly <- function(gg, x = -0.02, y = -0.08){
@@ -87,14 +88,17 @@ $CAPTURE  @annotated
 
 
 # input = NULL
+# input$nsubj = 50
+# input$ntrial = 100
 # input$cmt = "1cmt"
 # input$route = "iv"
-# input$dosetype = "WT-based"
-# input$dose = 100
+# input$dosetype = "WT-based" #"Fixed"
+# input$dose = 100 #c(1000, 2000, 3000, 4000)
 # input$adose = 100
 # input$tinf = 0
 # input$ii = 24
 # input$agerange = c(0, 18)
+# input$wtrange = c(0, 80)
 # input$age = c(6, 12, 18)
 # input$wt = choices = c(10, 20, 30)
 # input$theta = NULL
@@ -108,6 +112,8 @@ $CAPTURE  @annotated
 # input$vp = 10
 # input$ka = 1
 # input$log = FALSE
+# input$cl_wt <- 0.75
+# input$vc_wt <- 0.75
 
 
 header <- dashboardHeader(title = "PEDEX Dashboard")
@@ -134,6 +140,9 @@ body <- dashboardBody(
                 id = "tabset1", width = 4,
                 tabPanel("Dosing",
                          submitButton("Update", icon("refresh")),
+                         # actionButton("run_stochas", "Run Stochastic Simulation"),
+                         numericInput("nsubj", label = "N subjects", value = 50),
+                         numericInput("ntrial", label = "N trials", value = 1),
                          radioButtons("route", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "sc/oral", inline = TRUE),
                          radioButtons("dosetype", label = "Dosing Type", choices = c("Fixed", "WT-based"), selected = "Fixed", inline = TRUE),
                          selectizeInput("adose", "Dose Amount for Adults", 
@@ -141,6 +150,7 @@ body <- dashboardBody(
                          selectizeInput("dose", "Dose Amount for Pediatrics [Option 1. Single dose level for all WT tiers, Option 2. Different dose levels for each WT tier (the number of dose levels should match the number of WT tiers)]", 
                                         choices = c(50, 75, 100, 125), selected = c(50, 75, 100, 125), multiple = TRUE, options = list(create = TRUE)),
                          sliderInput("agerange", label = "Age Range", min = 0, max = 18, value = c(2, 18)),
+                         sliderInput("wtrange", label = "Weight Range", min = 0, max = 120, value = c(0, 80)),
                          selectizeInput("age", "Age Cutpoint", choices = c(6, 12), selected = c(6, 12), multiple = TRUE, options = list(create = TRUE)),
                          selectizeInput("wt", "Weight Cutpoint", choices = c(20, 30, 40), selected = c(20, 30, 40), multiple = TRUE, options = list(create = TRUE)),
                          conditionalPanel(condition = "input.route == 'iv'",
@@ -155,6 +165,8 @@ body <- dashboardBody(
                          conditionalPanel(condition = "input.cmt == '2cmt'",
                                           numericInput("q", "Theta (Q)", value = 2),
                                           numericInput("vp", "Theta (VP)", value = 10)),
+                         numericInput("cl_wt", "WT on CL (Power Exponent)", value = 0.75),
+                         numericInput("vc_wt", "WT on VC (Power Exponent)", value = 0.75),
                          conditionalPanel(condition = "input.route == 'sc/oral'",
                                           numericInput("ka", "Theta (KA)", value = 1)),
                          radioButtons("omegatype", label = "Omega Structure", choices = c("Diag", "Block", "Zero"), selected = "Block", inline = TRUE),
@@ -178,7 +190,11 @@ body <- dashboardBody(
                          checkboxInput("log", label = "Log?", value = FALSE),
                          plotlyOutput("pkage", height = 700, width = "100%")),
                 tabPanel("Exposure vs. Weight", plotlyOutput("pkbxpwt", height = 700, width = "100%")),
-                tabPanel("Exposure vs. Age", plotlyOutput("pkbxpage", height = 700, width = "100%"))
+                tabPanel("Exposure vs. Age", plotlyOutput("pkbxpage", height = 700, width = "100%")),
+                tabPanel("Exposure vs. Weight (Continuous)", plotlyOutput("pkscatbw", height = 700, width = "100%")),
+                tabPanel("Exposure vs. Age (Continuous)", plotlyOutput("pkscatage", height = 700, width = "100%")),
+                tabPanel("Proportion Matched by Weight", tableOutput("pmatchwt")),
+                tabPanel("Proportion Matched by Age", tableOutput("pmatchage"))
               )
               )
             ),
@@ -228,25 +244,35 @@ server <- function(input, output) {
   #   })
   
   re_simdf <- reactive({
+    
     mod <- mcode("mod", input$modelcode)
     # mod <- mread("mod", file = "./model/pk2cmt2.cpp")
     
-    Nsubj <- 500
+    Nsubj <- input$nsubj
+    Ntrial <- input$ntrial
     
     nhanes_filtered <- nhanes %>% 
-      filter(AGE >= input$agerange[1], AGE <= input$agerange[2])
+      filter(AGE >= input$agerange[1], AGE <= input$agerange[2], WT >= input$wtrange[1], WT <= input$wtrange[2])
     nhanes_adults <- nhanes %>% 
       filter(AGE >= 18)
     
+    set.seed(1234)
     data <- expand.ev(amt = as.numeric(input$dose)[1],
                       tinf = input$tinf,
-                      ss = 0:1,#input$ss,
+                      ss = 0,
                       ii = input$ii,
                       cmt = ifelse(input$route == "iv", 2, 1),
                       addl = 1,
-                      SEQN = rep(sample(nhanes_filtered$SEQN, Nsubj))) %>% 
-      mutate(ss2 = rep(c(0, 1), times = Nsubj),
-             id2 = rep(1:Nsubj, each = 2)) %>% 
+                      SEQN = nhanes_filtered$SEQN,
+                      trial = 1:Ntrial) %>%
+      group_by(trial) %>% 
+      sample_n(size = Nsubj, replace = FALSE) %>% 
+      ungroup() %>% 
+      bind_rows(slice(., 1:n()) %>% mutate(ss = 1)) %>% 
+      arrange(trial, ID, ss) %>% 
+      mutate(ID = 1:n(),
+             ss2 = ss,
+             id2 = SEQN) %>% 
       left_join(nhanes_filtered) %>% 
       mutate(WT2 = as.numeric(cut2(WT, cuts = as.numeric(input$wt)))) %>% 
       group_by(ID) %>% 
@@ -258,12 +284,13 @@ server <- function(input, output) {
                              ii = input$ii,
                              cmt = ifelse(input$route == "iv", 2, 1),
                              addl = 1,
-                             SEQN = rep(sample(nhanes_adults$SEQN, Nsubj))) %>% 
-      mutate(ss2 = rep(c(0, 1), times = Nsubj),
-             id2 = rep(1:Nsubj, each = 2)) %>% 
+                             SEQN = rep(sample(nhanes_adults$SEQN, 1000))) %>% 
+      mutate(trial = 1,
+             ss2 = rep(c(0, 1), times = 1000),
+             id2 = rep(1:1000, each = 2)) %>% 
       left_join(nhanes_adults)
     
-    mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc)
+    mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc, CL_WT = input$cl_wt, VC_WT = input$vc_wt)
     
     if(input$cmt == "1cmt") mod <- mod %>% param(TVQ = 0)
     
@@ -289,17 +316,18 @@ server <- function(input, output) {
     simdf_peds <- mod %>%
       data_set(data) %>%
       Req(CP, AUC) %>%
-      carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2) %>% 
+      carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2, trial) %>% 
       mrgsim_df(end = input$ii * 2, tgrid = tgrid(0, input$ii * 2, 0.1), obsonly = F, tad = TRUE) %>% 
       tbl_df() %>% 
       mutate(ss2 = recode(ss2,
                           `0` = "First Dose",
                           `1` = "Steady-State"),
              pop = "peds")
+    
     simdf_adults <- mod %>%
       data_set(data_adults) %>%
       Req(CP, AUC) %>%
-      carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2) %>% 
+      carry_out(WT, AGE, SEX, amt, evid, cmt, ss, ii, ss2, id2, trial) %>% 
       mrgsim_df(end = input$ii * 2, tgrid = tgrid(0, input$ii * 2, 0.1), obsonly = F, tad = TRUE) %>% 
       tbl_df() %>% 
       mutate(ss2 = recode(ss2,
@@ -320,39 +348,50 @@ server <- function(input, output) {
     
     })
   
+  
+  pkstats_adults <- reactive({
+    
+    pkstats_adults <- re_sumpk_adults()
+    
+    pkstats_adults %>% 
+    group_by(exposure) %>%
+    summarise(P05 = quantile(value, probs = 0.05),
+              P50 = quantile(value, probs = 0.5),
+              P95 = quantile(value, probs = 0.95)) %>% 
+      ungroup()
+  })
+    
+  
   # output$tbl <- renderDT(
   #   re_simdf() %>% filter(pop == "peds"), options = list(lengthChange = FALSE)
   # )
   
   output$pkwt <- renderPlotly({
     
-    conc_summary <- re_simdf() %>%
+    re_simdf <- re_simdf()
+    
+    conc_summary <- re_simdf %>%
       # filter(pop == "peds") %>% 
       group_by(pop, ss2, time, WTC) %>% 
       summarise(conc_m = quantile(CP, probs = 0.5),
                 conc_l = quantile(CP, probs = 0.05),
                 conc_u = quantile(CP, probs = 0.95)) %>% 
-      filter(!(ss2 == "Steady-State" & time == 0)) %>% 
+      # filter(!(ss2 == "Steady-State" & time == 0)) %>% 
       ungroup() %>% 
-      arrange(WTC, ss2, time)
+      arrange(WTC, ss2, time) %>% 
+      mutate(WTC = factor(WTC, levels = c("Adults", levels(WTC)[levels(WTC) != "Adults"])),
+             WTC2 = WTC)
     
-    conc_summary2 <- conc_summary %>% 
-      filter(pop == "peds") %>%
-      mutate(WTC2 = WTC) %>% 
-      bind_rows(conc_summary %>% 
-                  filter(pop == "adults") %>% 
-                  slice(rep(1:n(), times = length(input$wt) + 1))) %>% 
-      mutate(WTC2 = rep(WTC2[1:(n() / 2)], times = 2),
-             WTC = factor(WTC, levels = c("Adults", levels(WTC)[levels(WTC) != "Adults"])))
-
-    p <- ggplot(conc_summary2)+
+    p <- ggplot(conc_summary %>% filter(pop == "peds"))+
       facet_grid(ss2~WTC2)+
+      geom_ribbon(data = conc_summary %>% filter(pop == "adults") %>% dplyr::select(-WTC2),
+                  aes(x = time, ymax = conc_u, ymin = conc_l, colour = WTC, fill = WTC), alpha = 0.3)+
       geom_ribbon(aes(x = time, ymax = conc_u, ymin = conc_l, colour = WTC, fill = WTC), alpha = 0.3)+
       geom_line(aes(time, conc_m, colour = WTC, fill = WTC), size = 1.1)+
       # geom_point(aes(time, conc_m, colour = "Median"), alpha = 0.5, size = 1.2)+
       labs(x = "Time", y = "Concentration", colour = "Body Weight", fill = "Body Weight")+
-      scale_color_manual(values = c("darkgrey", get_palette("npg", 4)))+
-      scale_fill_manual(values = c("darkgrey", get_palette("npg", 4)))
+      scale_color_manual(values = c(get_palette("npg", length(levels(conc_summary$WTC)[levels(conc_summary$WTC) != "Adults"])), "darkgrey"))+
+      scale_fill_manual(values = c(get_palette("npg", length(levels(conc_summary$WTC)[levels(conc_summary$WTC) != "Adults"])), "darkgrey"))
     if(input$log) p <- p + scale_y_log10()
     p <- ggplotly(p) %>% layout(margin = list(l = 100, b = 100))
     layout_ggplotly(p, x = -0.05, y = -0.05)
@@ -361,57 +400,69 @@ server <- function(input, output) {
   
   output$pkage <- renderPlotly({
     
-    conc_summary <- re_simdf() %>%
+    re_simdf <- re_simdf()
+    
+    conc_summary <- re_simdf %>%
       # filter(pop == "peds") %>% 
       group_by(pop, ss2, time, AGEC) %>% 
       summarise(conc_m = quantile(CP, probs = 0.5),
                 conc_l = quantile(CP, probs = 0.05),
                 conc_u = quantile(CP, probs = 0.95)) %>% 
-      filter(!(ss2 == "Steady-State" & time == 0)) %>% 
+      # filter(!(ss2 == "Steady-State" & time == 0)) %>% 
       ungroup() %>% 
-      arrange(AGEC, ss2, time)
+      arrange(AGEC, ss2, time) %>% 
+      mutate(AGEC = factor(AGEC, levels = c("Adults", levels(AGEC)[levels(AGEC) != "Adults"])),
+             AGEC2 = AGEC)
     
-    conc_summary2 <- conc_summary %>% 
-      filter(pop == "peds") %>%
-      mutate(AGEC2 = AGEC) %>% 
-      bind_rows(conc_summary %>% 
-                  filter(pop == "adults") %>% 
-                  slice(rep(1:n(), times = length(input$age) + 1))) %>% 
-      mutate(AGEC2 = rep(AGEC2[1:(n() / 2)], times = 2),
-             AGEC = factor(AGEC, levels = c("Adults", levels(AGEC)[levels(AGEC) != "Adults"])))
-    
-    p <- ggplot(conc_summary2)+
+    p <- ggplot(conc_summary %>% filter(pop == "peds"))+
       facet_grid(ss2~AGEC2)+
+      geom_ribbon(data = conc_summary %>% filter(pop == "adults") %>% dplyr::select(-AGEC2),
+                  aes(x = time, ymax = conc_u, ymin = conc_l, colour = AGEC, fill = AGEC), alpha = 0.3)+
       geom_ribbon(aes(x = time, ymax = conc_u, ymin = conc_l, colour = AGEC, fill = AGEC), alpha = 0.3)+
       geom_line(aes(time, conc_m, colour = AGEC, fill = AGEC), size = 1.1)+
       # geom_point(aes(time, conc_m, colour = "Median"), alpha = 0.5, size = 1.2)+
-      labs(x = "Time", y = "Concentration", colour = "Age", fill = "Age")+
-      scale_color_manual(values = c("darkgrey", get_palette("npg", 4)))+
-      scale_fill_manual(values = c("darkgrey", get_palette("npg", 4)))
+      labs(x = "Time", y = "Concentration", colour = "Body Weight", fill = "Body Weight")+
+      scale_color_manual(values = c(get_palette("npg", length(levels(conc_summary$AGEC)[levels(conc_summary$AGEC) != "Adults"])), "darkgrey"))+
+      scale_fill_manual(values = c(get_palette("npg", length(levels(conc_summary$AGEC)[levels(conc_summary$AGEC) != "Adults"])), "darkgrey"))
     if(input$log) p <- p + scale_y_log10()
     p <- ggplotly(p) %>% layout(margin = list(l = 100, b = 100))
     layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   
   re_sumpk <- reactive({
-    re_sumpk <- re_simdf() %>% 
+    
+    re_simdf <- re_simdf()
+    
+    re_sumpk <- re_simdf %>% 
       filter(pop == "peds") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      group_by(pop, ID, WT, AGE, WTC, AGEC, ss2) %>% 
+      group_by(pop, trial, ID, WT, AGE, WTC, AGEC, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
                 Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])) %>% 
       gather(exposure, value, Cmax, Cmin, Cavg) %>% 
-      mutate(exposure = paste0(exposure, ": ", ss2))
+      ungroup() %>% 
+      mutate(exposure = paste0(exposure, ": ", ss2),
+             WTC1 = as.numeric(cut2(WT, cuts = seq(floor(min(WT)), ceiling(max(WT)), by = 1)))) %>% 
+      mutate(AGEC1 = as.numeric(cut2(AGE, cuts = seq(floor(min(AGE)), ceiling(max(AGE)), by = 1)))) %>% 
+      group_by(WTC, WTC1) %>% 
+      mutate(WTC1M = median(WT, na.rm = TRUE)) %>% 
+      group_by(AGEC, AGEC1) %>% 
+      mutate(AGEC1M = median(AGE, na.rm = TRUE)) %>% 
+      ungroup()
+    
     re_sumpk
   })
 
   
   re_sumpk_adults <- reactive({
-    re_sumpk_adults <- re_simdf() %>% 
+    
+    re_simdf <- re_simdf()
+    
+    re_sumpk_adults <- re_simdf %>% 
       filter(pop == "adults") %>% 
       filter(!((time ==  0 & evid == 0) | (time ==  0 & cmt == 1)) & time <= input$ii ) %>% 
-      group_by(pop, ID, WT, AGE, WTC, AGEC, ss2) %>% 
+      group_by(pop, trial, ID, WT, AGE, WTC, AGEC, ss2) %>% 
       summarise(Cmax = max(CP),
                 Cmin = min(CP),
                 Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])) %>% 
@@ -426,15 +477,12 @@ server <- function(input, output) {
   
   output$pkbxpwt <- renderPlotly({
     
-    pkstats_adults <- re_sumpk_adults() %>% 
-      group_by(exposure) %>%
-      summarise(P05 = quantile(value, probs = 0.05),
-                P50 = quantile(value, probs = 0.5),
-                P95 = quantile(value, probs = 0.95))
-      
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
     
-    p <- re_sumpk() %>% 
-      bind_rows(re_sumpk_adults()) %>% 
+    p <- re_sumpk %>% 
+      bind_rows(re_sumpk_adults) %>% 
       ungroup() %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
@@ -453,14 +501,12 @@ server <- function(input, output) {
   
   output$pkbxpage <- renderPlotly({
     
-    pkstats_adults <- re_sumpk_adults() %>% 
-      group_by(exposure) %>%
-      summarise(P05 = quantile(value, probs = 0.05),
-                P50 = quantile(value, probs = 0.5),
-                P95 = quantile(value, probs = 0.95))
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
     
-    p <- re_sumpk() %>% 
-      bind_rows(re_sumpk_adults()) %>% 
+    p <- re_sumpk %>% 
+      bind_rows(re_sumpk_adults) %>% 
       ungroup() %>% 
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y")+
@@ -477,6 +523,106 @@ server <- function(input, output) {
     layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   
+  
+  output$pkscatbw <- renderPlotly({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
+    
+    re_sumpk_stat <- re_sumpk %>%
+      group_by(WTC1, WTC1M, WTC, ss2, exposure) %>%
+      summarise_at(vars(value),
+                   list(
+                     N = ~ n(),
+                     P05 =  ~ quantile(., probs = 0.05, na.rm = TRUE),
+                     P50 =  ~ quantile(., probs = 0.5, na.rm = TRUE),
+                     P95 =  ~ quantile(., probs = 0.95, na.rm = TRUE)
+                   )) %>% 
+      ungroup() %>% 
+      arrange(WTC1M)
+    
+    p <- re_sumpk %>% 
+      ggplot() +
+      facet_wrap(~exposure, ncol = 2, scales = "free_y")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P95), colour = "darkgrey", linetype = "dashed")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P05), colour = "darkgrey", linetype = "dashed")+
+      geom_ribbon(data = re_sumpk_stat, aes(WTC1M, ymin = P05, ymax = P95, fill = WTC), alpha = 0.3)+
+      geom_line(data = re_sumpk_stat, aes(WTC1M, P50, colour = WTC), alpha = 0.3, size = 1.2)+
+      scale_color_npg()+
+      scale_fill_npg()+
+      labs(x = "Body Weight (kg)", y = "Exposure", colour = "", fill = "")
+    # theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
+        
+  })
+  
+  output$pkscatage <- renderPlotly({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
+    
+    re_sumpk_stat <- re_sumpk %>%
+      group_by(AGEC1, AGEC1M, AGEC, ss2, exposure) %>%
+      summarise_at(vars(value),
+                   list(
+                     N = ~ n(),
+                     P05 =  ~ quantile(., probs = 0.05, na.rm = TRUE),
+                     P50 =  ~ quantile(., probs = 0.5, na.rm = TRUE),
+                     P95 =  ~ quantile(., probs = 0.95, na.rm = TRUE)
+                   )) %>% 
+      ungroup() %>% 
+      arrange(AGEC1M)
+    
+    p <- re_sumpk %>% 
+      ggplot() +
+      facet_wrap(~exposure, ncol = 2, scales = "free_y")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P50), colour = "darkgrey", linetype = "dashed")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P95), colour = "darkgrey", linetype = "dashed")+
+      geom_hline(data = pkstats_adults, aes(yintercept = P05), colour = "darkgrey", linetype = "dashed")+
+      geom_ribbon(data = re_sumpk_stat, aes(AGEC1M, ymin = P05, ymax = P95, fill = AGEC), alpha = 0.3)+
+      geom_line(data = re_sumpk_stat, aes(AGEC1M, P50, colour = AGEC), alpha = 0.3, size = 1.2)+
+      scale_color_npg()+
+      scale_fill_npg()+
+      labs(x = "Age (year)", y = "Exposure", colour = "", fill = "")
+    # theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
+    layout_ggplotly(p, x = -0.05, y = -0.05)
+  })
+  
+  output$pmatchwt <- renderTable({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
+    
+    re_sumpk %>% 
+      left_join(pkstats_adults) %>% 
+      mutate(Prop = value >= P05 & value <= P95) %>% 
+      group_by(WTC) %>% 
+      summarise(Prop = mean(Prop)) %>% 
+      rename("Weight Category" = WTC, "Proportion of Subjects within Adult P05-P95 Exposure" = Prop)
+
+  })
+  
+  output$pmatchage <- renderTable({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    pkstats_adults <- pkstats_adults()
+    
+    re_sumpk %>% 
+      left_join(pkstats_adults) %>% 
+      mutate(Prop = value >= P05 & value <= P95) %>% 
+      group_by(AGEC) %>% 
+      summarise(Prop = mean(Prop)) %>% 
+      rename("Age Category" = AGEC, "Proportion of Subjects within Adult P05-P95 Exposure" = Prop)
+    
+    
+  })
   
 }
 
