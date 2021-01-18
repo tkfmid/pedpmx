@@ -188,10 +188,18 @@ body <- dashboardBody(
             selectizeInput("bsa", "BSA Cutpoint", choices = c(0.8, 1.1, 1.5), selected = c(0.8, 1.1, 1.5), multiple = TRUE, options = list(create = TRUE))
           ),
           tabPanel(
-            "Simulation",
+            "Simulation Setting",
             submitButton("Update", icon("refresh")),
-            numericInput("nsubj", label = "N subjects", value = 50),
-            numericInput("ntrial", label = "N trials", value = 1),
+            radioButtons("stat", label = "Summarise Pediatric Statistics for", choices = c("Population Mean / Variability", "Trial Mean / Uncertainty"), selected = "Population Mean / Variability", inline = TRUE),
+            numericInput("nsubj", label = "N of Pediatric Subjects", value = 50),
+            numericInput("ntrial", label = "N of Pediatric Trials", value = 1),
+            radioButtons("stat2", label = "Summarise Adult Statistics for", 
+                         choices = c("Population Mean / Variability (from 1000 Subjects)"), 
+                         selected = "Population Mean / Variability (from 1000 Subjects)", inline = TRUE),
+          ),
+          tabPanel(
+            "PK Parameters",
+            submitButton("Update", icon("refresh")),
             radioButtons("cmt", label = "Model", choices = c("1cmt", "2cmt"), selected = "2cmt", inline = TRUE),
             numericInput("cl", "Theta (CL)", value = 1),
             numericInput("vc", "Theta (VC)", value = 20),
@@ -247,9 +255,9 @@ body <- dashboardBody(
           tabPanel("Exposure vs. Weight (Continuous)", plotlyOutput("pkscatbw", height = 700, width = "100%")),
           tabPanel("Exposure vs. BSA (Continuous)", plotlyOutput("pkscatbsa", height = 700, width = "100%")),
           tabPanel("Exposure vs. Age (Continuous)", plotlyOutput("pkscatage", height = 700, width = "100%")),
-          tabPanel("Proportion Matched by Weight", plotlyOutput("pmatchwt")),
-          tabPanel("Proportion Matched by BSA", plotlyOutput("pmatchbsa")),
-          tabPanel("Proportion Matched by Age", plotlyOutput("pmatchage"))
+          tabPanel("Proportion Matched by Weight", plotlyOutput("pmatchwt", height = 700, width = "100%")),
+          tabPanel("Proportion Matched by BSA", plotlyOutput("pmatchbsa", height = 700, width = "100%")),
+          tabPanel("Proportion Matched by Age", plotlyOutput("pmatchage", height = 700, width = "100%"))
         )
       )
     ),
@@ -310,10 +318,10 @@ server <- function(input, output) {
     set.seed(nseed)
     anhanes <- nhanes %>%
       filter(AGE >= 18) %>%
-      sample_n(size = Nsubj * Ntrial, replace = TRUE) %>%
+      sample_n(size = 1000, replace = TRUE) %>%
       mutate(
-        subj = rep(1:Nsubj, times = Ntrial),
-        trial = rep(1:Ntrial, each = Nsubj),
+        subj = rep(1:1000, times = 1),
+        trial = rep(1, each = 1000),
         ID = 1:n()
       )
 
@@ -540,7 +548,7 @@ server <- function(input, output) {
   pkstats_adults <- reactive({
     re_sumpk_adults <- re_sumpk_adults()
 
-    pkstats_adults <- re_sumpk_adults %>%
+    pkstats_adults <- re_sumpk_adults %>% 
       group_by(exposure) %>%
       summarise(
         P05 = quantile(value, probs = 0.05, na.rm = TRUE),
@@ -556,7 +564,17 @@ server <- function(input, output) {
   output$pkwt <- renderPlotly({
     re_simdf <- re_simdf()
     
-    conc_summary <- re_simdf %>%
+    conc_summary <- re_simdf
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      conc_summary <- conc_summary %>% 
+        filter(pop == "peds") %>% 
+        group_by(trial, pop, ss2, time, WTC) %>% 
+        summarise(CP = mean(CP)) %>% 
+        bind_rows(conc_summary %>% filter(pop == "adults"))
+    }
+    
+    conc_summary <- conc_summary %>% 
       # filter(pop == "peds") %>%
       group_by(pop, ss2, time, WTC) %>%
       summarise(
@@ -592,7 +610,17 @@ server <- function(input, output) {
   output$pkbsa <- renderPlotly({
     re_simdf <- re_simdf()
 
-    conc_summary <- re_simdf %>%
+    conc_summary <- re_simdf
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      conc_summary <- conc_summary %>% 
+        filter(pop == "peds") %>% 
+        group_by(trial, pop, ss2, time, BSAC) %>% 
+        summarise(CP = mean(CP)) %>% 
+        bind_rows(conc_summary %>% filter(pop == "adults"))
+    }
+    
+    conc_summary <- conc_summary %>% 
       # filter(pop == "peds") %>%
       group_by(pop, ss2, time, BSAC) %>%
       summarise(
@@ -632,7 +660,17 @@ server <- function(input, output) {
   output$pkage <- renderPlotly({
     re_simdf <- re_simdf()
 
-    conc_summary <- re_simdf %>%
+    conc_summary <- re_simdf
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      conc_summary <- conc_summary %>% 
+        filter(pop == "peds") %>% 
+        group_by(trial, pop, ss2, time, AGEC) %>% 
+        summarise(CP = mean(CP)) %>% 
+        bind_rows(conc_summary %>% filter(pop == "adults"))
+    }
+    
+    conc_summary <- conc_summary %>% 
       # filter(pop == "peds") %>%
       group_by(pop, ss2, time, AGEC) %>%
       summarise(
@@ -674,8 +712,16 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    p <- re_sumpk %>%
-      bind_rows(re_sumpk_adults) %>%
+    p <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, exposure, WTC) %>% 
+        summarise(value = mean(value))
+    }
+    
+    p <- p %>%
+      bind_rows(re_sumpk_adults) %>% 
       ungroup() %>%
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y") +
@@ -697,8 +743,16 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
     
-    p <- re_sumpk %>%
-      bind_rows(re_sumpk_adults) %>%
+    p <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, exposure, BSAC) %>% 
+        summarise(value = mean(value))
+    }
+    
+    p <- p %>%
+      bind_rows(re_sumpk_adults) %>% 
       ungroup() %>%
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y") +
@@ -720,8 +774,16 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    p <- re_sumpk %>%
-      bind_rows(re_sumpk_adults) %>%
+    p <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, exposure, AGEC) %>% 
+        summarise(value = mean(value))
+    }
+    
+    p <- p %>%
+      bind_rows(re_sumpk_adults) %>% 
       ungroup() %>%
       ggplot() +
       facet_wrap(~exposure, ncol = 2, scales = "free_y") +
@@ -744,7 +806,15 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    re_sumpk_stat <- re_sumpk %>%
+    re_sumpk_stat <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      re_sumpk_stat <- re_sumpk_stat %>% 
+        group_by(trial, WTC1, WTC1M, WTC, ss2, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    re_sumpk_stat <- re_sumpk_stat %>% 
       group_by(WTC1, WTC1M, WTC, ss2, exposure) %>%
       summarise_at(
         vars(value),
@@ -779,7 +849,15 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
     
-    re_sumpk_stat <- re_sumpk %>%
+    re_sumpk_stat <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      re_sumpk_stat <- re_sumpk_stat %>% 
+        group_by(trial, BSAC1, BSAC1M, BSAC, ss2, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    re_sumpk_stat <- re_sumpk_stat %>% 
       group_by(BSAC1, BSAC1M, BSAC, ss2, exposure) %>%
       summarise_at(
         vars(value),
@@ -814,7 +892,15 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    re_sumpk_stat <- re_sumpk %>%
+    re_sumpk_stat <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      re_sumpk_stat <- re_sumpk_stat %>% 
+        group_by(trial, AGEC1, AGEC1M, AGEC, ss2, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    re_sumpk_stat <- re_sumpk_stat %>% 
       group_by(AGEC1, AGEC1M, AGEC, ss2, exposure) %>%
       summarise_at(
         vars(value),
@@ -849,12 +935,21 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    p <- re_sumpk %>%
+    p <- re_sumpk
+      
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, WTC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+
+    p <- p %>% 
       left_join(pkstats_adults) %>%
       mutate(Prop = value >= P05 & value <= P95) %>%
-      group_by(WTC) %>%
+      group_by(WTC, exposure) %>%
       summarise(Prop = mean(Prop, na.rm = TRUE)) %>%
       ggplot(aes(x = WTC, y = Prop, fill = WTC)) +
+      facet_wrap(~exposure, ncol = 2, scales = "free_y") +
       geom_bar(stat = "identity") +
       geom_text(aes(
         y = Prop + 0.05,
@@ -865,7 +960,7 @@ server <- function(input, output) {
       scale_color_npg() +
       scale_fill_npg() +
       labs(
-        title = "Proportion of Subjects within Adult P05-P95 Exposure",
+        title = "Proportion within Adult P05-P95 Exposure",
         x = "Weight Category",
         y = "Proportion",
         fill = "Weight Category"
@@ -873,7 +968,7 @@ server <- function(input, output) {
       scale_y_continuous(limits = c(0, 1.1), breaks = (0:10) / 10)
 
     p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
-    p
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
 
   output$pmatchbsa <- renderPlotly({
@@ -881,12 +976,21 @@ server <- function(input, output) {
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
     
-    p <- re_sumpk %>%
+    p <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, BSAC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    p <- p %>% 
       left_join(pkstats_adults) %>%
       mutate(Prop = value >= P05 & value <= P95) %>%
-      group_by(BSAC) %>%
+      group_by(BSAC, exposure) %>%
       summarise(Prop = mean(Prop, na.rm = TRUE)) %>%
       ggplot(aes(x = BSAC, y = Prop, fill = BSAC)) +
+      facet_wrap(~exposure, ncol = 2, scales = "free_y") +
       geom_bar(stat = "identity") +
       geom_text(aes(
         y = Prop + 0.05,
@@ -897,7 +1001,7 @@ server <- function(input, output) {
       scale_color_npg() +
       scale_fill_npg() +
       labs(
-        title = "Proportion of Subjects within Adult P05-P95 Exposure",
+        title = "Proportion within Adult P05-P95 Exposure",
         x = "BSA Category",
         y = "Proportion",
         fill = "BSA Category"
@@ -905,19 +1009,28 @@ server <- function(input, output) {
       scale_y_continuous(limits = c(0, 1.1), breaks = (0:10) / 10)
     
     p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
-    p
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
   output$pmatchage <- renderPlotly({
     re_sumpk_adults <- re_sumpk_adults()
     re_sumpk <- re_sumpk()
     pkstats_adults <- pkstats_adults()
 
-    p <- re_sumpk %>%
+    p <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      p <- p %>% 
+        group_by(trial, AGEC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    p <- p %>% 
       left_join(pkstats_adults) %>%
       mutate(Prop = value >= P05 & value <= P95) %>%
-      group_by(AGEC) %>%
+      group_by(AGEC, exposure) %>%
       summarise(Prop = mean(Prop, na.rm = TRUE)) %>%
       ggplot(aes(x = AGEC, y = Prop, fill = AGEC)) +
+      facet_wrap(~exposure, ncol = 2, scales = "free_y") +
       geom_bar(stat = "identity") +
       geom_text(aes(
         y = Prop + 0.05,
@@ -928,7 +1041,7 @@ server <- function(input, output) {
       scale_color_npg() +
       scale_fill_npg() +
       labs(
-        title = "Proportion of Subjects within Adult P05-P95 Exposure",
+        title = "Proportion within Adult P05-P95 Exposure",
         x = "Age Category",
         y = "Proportion",
         fill = "Age Category"
@@ -936,7 +1049,7 @@ server <- function(input, output) {
       scale_y_continuous(limits = c(0, 1.1), breaks = (0:10) / 10)
 
     p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
-    p
+    layout_ggplotly(p, x = -0.05, y = -0.05)
   })
 }
 
