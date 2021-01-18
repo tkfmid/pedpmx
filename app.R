@@ -172,7 +172,7 @@ body <- dashboardBody(
             # actionButton("run_stochas", "Run Stochastic Simulation"),
             radioButtons("proute", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "sc/oral", inline = TRUE),
             radioButtons("pdosetype", label = "Dosing Type", choices = c("WT-Tiered Fixed", "BSA-Tiered Fixed", "WT-based", "BSA-based"), selected = "BSA-based", inline = TRUE),
-            selectizeInput("pdose", "Dose Amount for Pediatrics [Option 1. Single dose level for all WT tiers, Option 2. Different dose levels for each WT tier (the number of dose levels should match the number of WT tiers)]",
+            selectizeInput("pdose", "Dose Amount for Pediatrics [Option 1. Single dose level, Option 2. Different dose levels for each WT/BSA tier (the number of dose levels should match the number of tiers)]",
               choices = 300, selected = 300, multiple = TRUE, options = list(create = TRUE)
             ),
 
@@ -518,8 +518,10 @@ server <- function(input, output) {
       ungroup() %>%
       mutate(
         exposure = paste0(exposure, ": ", ss2),
-        WTC1 = as.numeric(cut2(WT, cuts = seq(floor(min(WT)), ceiling(max(WT)), by = 1))),
-        BSAC1 = as.numeric(cut2(BSA, cuts = seq(floor(min(BSA)), ceiling(max(BSA)), by = 0.1)))
+        # WTC1 = as.numeric(cut2(WT, cuts = seq(floor(min(WT)), ceiling(max(WT)), by = 5))),
+        WTC1 = as.numeric(cut2(WT, g = 10)),
+        # BSAC1 = as.numeric(cut2(BSA, cuts = seq(floor(min(BSA)), ceiling(max(BSA)), by = 0.1))),
+        BSAC1 = as.numeric(cut2(BSA, g = 10))
       ) %>%
       mutate(AGEC1 = as.numeric(cut2(AGE, cuts = seq(floor(min(AGE)), ceiling(max(AGE)), by = 1)))) %>%
       group_by(WTC, WTC1) %>%
