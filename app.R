@@ -171,9 +171,9 @@ body <- dashboardBody(
             submitButton("Update", icon("refresh")),
             # actionButton("run_stochas", "Run Stochastic Simulation"),
             radioButtons("proute", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "sc/oral", inline = TRUE),
-            radioButtons("pdosetype", label = "Dosing Type", choices = c("WT-Tiered Fixed", "BSA-Tiered Fixed", "WT-based", "BSA-based"), selected = "BSA-based", inline = TRUE),
+            radioButtons("pdosetype", label = "Dosing Type", choices = c("WT-Tiered Fixed", "BSA-Tiered Fixed", "WT-based", "BSA-based"), selected = "BSA-Tiered Fixed", inline = TRUE),
             selectizeInput("pdose", "Dose Amount for Pediatrics [Option 1. Single dose level, Option 2. Different dose levels for each WT/BSA tier (the number of dose levels should match the number of tiers)]",
-              choices = 300, selected = 300, multiple = TRUE, options = list(create = TRUE)
+              choices = c(200, 300, 400, 600), selected = c(200, 300, 400, 600), multiple = TRUE, options = list(create = TRUE)
             ),
 
             conditionalPanel(
@@ -191,8 +191,8 @@ body <- dashboardBody(
             "Simulation Setting",
             submitButton("Update", icon("refresh")),
             radioButtons("stat", label = "Summarise Pediatric Statistics for", choices = c("Population Mean / Variability", "Trial Mean / Uncertainty"), selected = "Population Mean / Variability", inline = TRUE),
-            numericInput("nsubj", label = "N of Pediatric Subjects", value = 50),
-            numericInput("ntrial", label = "N of Pediatric Trials", value = 1),
+            numericInput("nsubj", label = "N of Pediatric Subjects", value = 20),
+            numericInput("ntrial", label = "N of Pediatric Trials", value = 20),
             radioButtons("stat2", label = "Summarise Adult Statistics for", 
                          choices = c("Population Mean / Variability (from 1000 Subjects)"), 
                          selected = "Population Mean / Variability (from 1000 Subjects)", inline = TRUE),
@@ -236,17 +236,17 @@ body <- dashboardBody(
           # tabPanel("Simulated Dataset", DTOutput("tbl")),
           tabPanel(
             "PK Profile by Weight",
-            checkboxInput("log", label = "Log?", value = FALSE),
+            checkboxInput("log", label = "Log?", value = TRUE),
             plotlyOutput("pkwt", height = 700, width = "100%")
           ),
           tabPanel(
             "PK Profile by BSA",
-            checkboxInput("log", label = "Log?", value = FALSE),
+            checkboxInput("log", label = "Log?", value = TRUE),
             plotlyOutput("pkbsa", height = 700, width = "100%")
           ),
           tabPanel(
             "PK Profile by Age",
-            checkboxInput("log", label = "Log?", value = FALSE),
+            checkboxInput("log", label = "Log?", value = TRUE),
             plotlyOutput("pkage", height = 700, width = "100%")
           ),
           tabPanel("Exposure vs. Weight", plotlyOutput("pkbxpwt", height = 700, width = "100%")),
