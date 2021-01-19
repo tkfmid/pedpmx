@@ -12,9 +12,10 @@ library(ggthemes)
 library(foreign)
 library(mrgsolve)
 library(Hmisc)
-library(DT)
-library(furrr)
+library(arsenal)
 theme_set(theme_pubr(base_size = 10))
+
+source("arsenal_functions.R")
 
 layout_ggplotly <- function(gg, x = -0.02, y = -0.08) {
   # The 1 and 2 goes into the list that contains the options for the x and y axis labels respectively
@@ -257,7 +258,10 @@ body <- dashboardBody(
           tabPanel("Exposure vs. Age (Continuous)", plotlyOutput("pkscatage", height = 700, width = "100%")),
           tabPanel("Proportion Matched by Weight", plotlyOutput("pmatchwt", height = 700, width = "100%")),
           tabPanel("Proportion Matched by BSA", plotlyOutput("pmatchbsa", height = 700, width = "100%")),
-          tabPanel("Proportion Matched by Age", plotlyOutput("pmatchage", height = 700, width = "100%"))
+          tabPanel("Proportion Matched by Age", plotlyOutput("pmatchage", height = 700, width = "100%")),
+          tabPanel("Summary Table by Weight", tableOutput("tablewt")),
+          tabPanel("Summary Table by BSA", tableOutput("tablebsa")),
+          tabPanel("Summary Table by Age", tableOutput("tableage"))
         )
       )
     ),
@@ -498,7 +502,7 @@ server <- function(input, output) {
     re_sumpk_adults <- re_simdf %>%
       filter(pop == "adults") %>%
       filter(!((time == 0 & evid == 0) | (time == 0 & cmt == 1)) & time <= input$aii) %>%
-      group_by(pop, trial, subj, ID, WT, AGE, WTC, AGEC, BSAC, ss2) %>%
+      group_by(pop, trial, subj, ID, WT, AGE, BSA, WTC, AGEC, BSAC, ss2) %>%
       summarise(
         Cmax = max(CP),
         Cmin = min(CP),
@@ -1051,6 +1055,73 @@ server <- function(input, output) {
     p <- ggplotly(p) %>% layout(margin = list(l = 75, b = 75))
     layout_ggplotly(p, x = -0.05, y = -0.05)
   })
+  
+  output$tablewt <- renderTable({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    
+    table_1 <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      table_1 <- table_1 %>% 
+        group_by(trial, ss2, WTC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    table_1 <- table_1 %>% 
+      bind_rows(re_sumpk_adults) %>% 
+      mutate(exposure = str_extract(exposure, ".*(?=:)")) %>% 
+      spread(exposure, value)
+    
+    as.data.frame(summary(tableby(WTC ~ Cavg + Cmax + Cmin, data = table_1,strata=ss2,
+                                  control = arsenal_control), text = "html"))
+  }, sanitize.text.function = function(x) x)
+  
+  output$tablebsa <- renderTable({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    
+    table_1 <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      table_1 <- table_1 %>% 
+        group_by(trial, ss2, BSAC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    table_1 <- table_1 %>% 
+      bind_rows(re_sumpk_adults) %>% 
+      mutate(exposure = str_extract(exposure, ".*(?=:)")) %>% 
+      spread(exposure, value)
+    
+    as.data.frame(summary(tableby(BSAC ~ Cavg + Cmax + Cmin, data = table_1,strata=ss2,
+                                  control = arsenal_control), text = "html"))
+  }, sanitize.text.function = function(x) x)
+  
+  output$tableage <- renderTable({
+    
+    re_sumpk_adults <- re_sumpk_adults()
+    re_sumpk <- re_sumpk()
+    
+    table_1 <- re_sumpk
+    
+    if(input$stat == "Trial Mean / Uncertainty"){
+      table_1 <- table_1 %>% 
+        group_by(trial, ss2, AGEC, exposure) %>% 
+        summarise(value = mean(value))
+    }
+    
+    table_1 <- table_1 %>% 
+      bind_rows(re_sumpk_adults) %>% 
+      mutate(exposure = str_extract(exposure, ".*(?=:)")) %>% 
+      spread(exposure, value)
+    
+    as.data.frame(summary(tableby(AGEC ~ Cavg + Cmax + Cmin, data = table_1,strata=ss2,
+                                  control = arsenal_control), text = "html"))
+  }, sanitize.text.function = function(x) x)
+  
 }
 
 shinyApp(ui, server)
