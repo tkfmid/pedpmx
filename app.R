@@ -1159,4 +1159,4 @@ server <- function(input, output, session) {
 
 
 
-shinyApp(ui, server, enableBookmarking = "server")
+shinyApp(ui, server, enableBookmarking = "url")
