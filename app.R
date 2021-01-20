@@ -153,7 +153,6 @@ ui <- function(request){
             tabPanel(
               "Adult Dosing",
               submitButton("Update", icon("refresh")),
-              # bookmarkButton(),
               # actionButton("run_stochas", "Run Stochastic Simulation"),
               radioButtons("aroute", label = "Route of administration", choices = c("iv", "sc/oral"), selected = "sc/oral", inline = TRUE),
               radioButtons("adosetype", label = "Dosing Type", choices = c("Fixed", "WT-based", "BSA-based"), selected = "Fixed", inline = TRUE),
@@ -292,6 +291,27 @@ ui <- function(request){
 }
 
 server <- function(input, output, session) {
+  
+  
+  
+  # Automatically bookmark every time an input changes
+  observe({
+    reactiveValuesToList(input)
+    session$doBookmark()
+  })
+  
+  # Update the query string
+  onBookmarked(updateQueryString)
+  
+  
+  onRestored(function(state) {
+    updateSelectizeInput(session, "adose", selected=state$input$adose, choices=c(600, state$input$adose), server=TRUE)
+    updateSelectizeInput(session, "pdose", selected=state$input$pdose, choices=c(600, state$input$pdose), server=TRUE)
+    updateSelectizeInput(session, "age", selected=state$input$age, choices=state$input$age, server=TRUE)
+    updateSelectizeInput(session, "wt", selected=state$input$wt, choices=state$input$wt, server=TRUE)
+    updateSelectizeInput(session, "bsa", selected=state$input$bsa, choices=state$input$bsa, server=TRUE)
+  })
+  
   
   # (https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?BeginYear=2015)
   
@@ -1133,35 +1153,10 @@ server <- function(input, output, session) {
                                   control = arsenal_control), text = "html"))
   }, sanitize.text.function = function(x) x)
   
-  # onBookmark(function(state) {
-  #   print(state) # you may want to have a look to this variable
-  #   state$values$re_simdf_backup <- re_simdf()
-  #   state$values$re_sumpk_adults_backup <- re_sumpk_adults()
-  #   state$values$re_sumpk_backup <- re_sumpk()
-  #   state$values$pkstats_adults_backup <- pkstats_adults()
-  # })
-  #
-  # # Read values from state$values when we restore
-  # onRestore(function(state) {
-  #   print(state$values$re_simdf_backup) # to show you that former data are indeed stored here, after that you do want ever you want with
-  #   print(state$values$re_sumpk_adults_backup) # to show you that former data are indeed stored here, after that you do want ever you want with
-  #   print(state$values$re_sumpk_backup) # to show you that former data are indeed stored here, after that you do want ever you want with
-  #   print(state$values$pkstats_adults_backup) # to show you that former data are indeed stored here, after that you do want ever you want with
-  #  
-  #   re_simdf <<- reactive(state$values$re_simdf_backup) # Double assignment request to force reactivty, not sure why
-  #   re_sumpk_adults <<- reactive(state$values$re_sumpk_adults_backup) # Double assignment request to force reactivty, not sure why
-  #   re_sumpk <<- reactive(state$values$re_sumpk_backup) # Double assignment request to force reactivty, not sure why
-  #   pkstats_adults <<- reactive(state$values$pkstats_adults_backup) # Double assignment request to force reactivty, not sure why
-  # })
-  
-  # Automatically bookmark every time an input changes
-  observe({
-    reactiveValuesToList(input)
-    session$doBookmark()
-  })
-  # Update the query string
-  onBookmarked(updateQueryString)
   
 }
 
-shinyApp(ui, server, enableBookmarking = "url")
+
+
+
+shinyApp(ui, server, enableBookmarking = "server")
