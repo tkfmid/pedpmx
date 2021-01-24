@@ -1,8 +1,6 @@
-# install.packages("pammtool")
+# Load packages
 library(shiny)
 library(shinydashboard)
-# library(shinyMatrix, lib.loc = "../R_packages")
-# library(shinyMatrix)
 library(tidyverse)
 library(plotly)
 library(ggpubr)
@@ -12,16 +10,18 @@ library(foreign)
 library(mrgsolve)
 library(Hmisc)
 library(arsenal)
-theme_set(theme_pubr(base_size = 10))
 
+# Source functions
 source("arsenal_functions.R")
-
+theme_set(theme_pubr(base_size = 10))
 layout_ggplotly <- function(gg, x = -0.02, y = -0.08) {
   # The 1 and 2 goes into the list that contains the options for the x and y axis labels respectively
   gg[["x"]][["layout"]][["annotations"]][[1]][["y"]] <- x
   gg[["x"]][["layout"]][["annotations"]][[2]][["x"]] <- y
   gg
 }
+
+# Define mrgsolve model code (overwritten later by use inputs but needed as a starting point)
 
 modelcode <- "
 Model file:  pk2cmt.cpp
@@ -40,14 +40,14 @@ $PROB
   TVQ    :  2  : Inter-compartmental clearance (volume/time)
   TVVP   : 10  : Peripheral volume of distribution (volume)
   TVKA1  :  1  : Absorption rate constant 1 (1/time)
-  KA2  :  1  : Absorption rate constant 2 (1/time)
-  VMAX :  0  : Maximum velocity (mass/time)
-  KM   :  2  : Michaelis Constant (mass/volume)
-  F1   : 1.0  : Bioavailability fraction 1 (.)
-  WT   :  70  : Body weight
-  CL_WT   :  0.75  : Power exponent
-  VC_WT   :  0.75  : Power exponent
-  WTref   :  70  : Reference WT
+  KA2    :  1  : Absorption rate constant 2 (1/time)
+  TVVMAX :  0  : Maximum velocity (mass/time)
+  TVKM   :  2  : Michaelis Constant (mass/volume)
+  F1     : 1.0  : Bioavailability fraction 1 (.)
+  WT     :  70  : Body weight
+  CL_WT  :  0.75  : Power exponent
+  VC_WT  :  0.75  : Power exponent
+  WTref  :  70  : Reference WT
  
   $CMT  @annotated
   EV1    : First extravascular compartment (mass)
@@ -63,21 +63,25 @@ $GLOBAL
 #define AUC (AUC1)
  
 $MAIN
-F_EV1 = F1;
+F_EV1 = F1 * exp(EF1);
 
 double CL = TVCL * pow(WT / WTref, CL_WT) * exp(ECL);
 double VC = TVVC * pow(WT / WTref, VC_WT) * exp(EVC);
 double Q = TVQ * exp(EQ);
 double VP = TVVP * exp(EVP);
 double KA1 = TVKA1 * exp(EKA1);
+double VMAX = TVVMAX * exp(EVMAX);
+double KM = TVKM * exp(EKM);
 
 $OMEGA @annotated @block
-  ECL : 0.2: ETA on CL
-  EVC : 0 0.2 : ETA on VC
-  EQ  : 0 0 0.2: ETA on Q
-  EVP : 0 0 0 0.2: ETA on VP
-  EKA1: 0 0 0 0 0.2: ETA on KA1
-  EF1 : 0 0 0 0 0 0: ETA on F1
+  ECL :   0.2: ETA on CL
+  EVC :   0 0.2 : ETA on VC
+  EQ  :   0 0 0.2: ETA on Q
+  EVP :   0 0 0 0.2: ETA on VP
+  EKA1:   0 0 0 0 0.2: ETA on KA1
+  EF1 :   0 0 0 0 0 0: ETA on F1
+  EVMAX : 0 0 0 0 0 0 0.2: ETA on VMAX
+  EKM :   0 0 0 0 0 0 0 0.2: ETA on KM
  
 $ODE
 dxdt_EV1 = -KA1*EV1;
@@ -126,6 +130,8 @@ ss_cmt = 'CENT'
 # input$vp <- 10
 # input$ka <- 1
 # input$f1 <- 1
+# input$vmax <- 0
+# input$km <- 2
 # input$log <- FALSE
 # input$cl_wt <- 0.75
 # input$vc_wt <- 0.75
@@ -133,17 +139,17 @@ ss_cmt = 'CENT'
 
 
 
-
-# Put them together into a dashboardPage
+# Define ui function
 ui <- function(request){
   
-  header <- dashboardHeader(title = "PEDEX Dashboard")
+  header <- dashboardHeader(title = "Pediatric Extrapolation Dashboard",
+                            titleWidth = 400)
   
   body <- dashboardBody(
     tabItems(
       tabItem(
         tabName = "pkdashboard",
-        h2("PK Dashboard"),
+        h2("Exposure Matching Dashboard"),
         
         fluidRow(
           tabBox(
@@ -200,12 +206,18 @@ ui <- function(request){
               "PK Parameters",
               submitButton("Update", icon("refresh")),
               radioButtons("cmt", label = "Model", choices = c("1cmt", "2cmt"), selected = "2cmt", inline = TRUE),
+              checkboxInput("nl", label = "Add non-linear term (Michaelis-Menten)?", value = FALSE),
               numericInput("cl", "Theta (CL)", value = 1),
               numericInput("vc", "Theta (VC)", value = 20),
               conditionalPanel(
                 condition = "input.cmt == '2cmt'",
                 numericInput("q", "Theta (Q)", value = 2),
                 numericInput("vp", "Theta (VP)", value = 10)
+              ),
+              conditionalPanel(
+                condition = "input.nl",
+                numericInput("vmax", "Theta (VMAX)", value = 0),
+              numericInput("km", "Theta (KM)", value = 2)
               ),
               conditionalPanel(
                 condition = "input.aroute == 'sc/oral'| input.proute == 'sc/oral'",
@@ -219,17 +231,28 @@ ui <- function(request){
               radioButtons("omegatype", label = "Omega Structure", choices = c("Diag", "Block", "Zero"), selected = "Block", inline = TRUE),
               conditionalPanel(
                 condition = "input.omegatype == 'Diag'",
-                textInput("omega", "Omega (comma delimited)\n[CL,VC,Q,VP,KA,F1]", value = "0.2, 0.2, 0.2, 0.2, 0.2, 0")
+                textAreaInput("omega", "Omega (comma delimited)\n[CL,VC,Q,VP,KA,F1,VMAX,KM]",
+                              value = "0.2, 0.2, 0.2, 0.2, 0.2, 0, 0.2, 0.2", 
+                              height = "400px")
               ),
               conditionalPanel(
                 condition = "input.omegatype == 'Block'",
-                textInput("omegab", "Omega (comma delimited)\n[CL,VC,Q,VP,KA,F1]", value = "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0")
+                textAreaInput("omegab", "Omega (comma delimited)\n[CL,VC,Q,VP,KA,F1,VMAX,KM]", 
+                              value = "
+0.2, 
+0.6, 0.2,
+0, 0, 0.2,
+0, 0, 0.6, 0.2,
+0, 0, 0, 0, 0.2,
+0, 0, 0, 0, 0, 0,
+0, 0, 0, 0, 0, 0, 0.2,
+0, 0, 0, 0, 0, 0, 0, 0.2", height = "400px")
               )
             ),
             tabPanel(
               "PK Model Code",
               submitButton("Update", icon("refresh")),
-              textAreaInput("modelcode", "Mrgsolve model text", value = modelcode)
+              textAreaInput("modelcode", "Mrgsolve model text", value = modelcode, height = "400px")
             )
           ),
           tabBox(
@@ -274,7 +297,7 @@ ui <- function(request){
   )
   sidebar <- dashboardSidebar(
     sidebarMenu(
-      menuItem("PK Dashboard", tabName = "pkdashboard", icon = icon("dashboard")),
+      menuItem("Exposure Matching Dashboard", tabName = "pkdashboard", icon = icon("dashboard")),
       menuItem("Source code",
                icon = icon("file-code-o"),
                href = "https://github.com/tkfmid/pedpmx"
@@ -289,6 +312,8 @@ ui <- function(request){
     body
   )
 }
+
+# Define server function
 
 server <- function(input, output, session) {
   
@@ -409,7 +434,7 @@ server <- function(input, output, session) {
         dose = amt
       )
     
-    mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc, CL_WT = input$cl_wt, VC_WT = input$vc_wt)
+    mod <- mod %>% param(TVCL = input$cl, TVVC = input$vc, CL_WT = input$cl_wt, VC_WT = input$vc_wt, TVVMAX = input$vmax, TVKM = input$km)
     
     if (input$cmt == "1cmt") mod <- mod %>% param(TVQ = 0)
     
