@@ -121,8 +121,8 @@ ss_cmt = 'CENT'
 # input$wt <- choices <- c(10, 20, 30)
 # input$theta <- NULL
 # input$omegatype <- "Block"
-# input$omega <- "0.2,0.2,0.2,0.2,0.2"
-# input$omegab <- "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2"
+# input$omega <- "0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2"
+# input$omegab <- "0.2, 0.6, 0.2, 0, 0, 0.2, 0, 0, 0.6, 0.2, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0, 0, 0.2"
 # input$modelcode <- modelcode
 # input$cl <- 1
 # input$vc <- 20
@@ -561,7 +561,7 @@ server <- function(input, output, session) {
       group_by(pop, trial, subj, ID, WT, AGE, BSA, WTC, AGEC, BSAC, ss2) %>%
       summarise(
         Cmax = max(CP),
-        Cmin = min(CP),
+        Cmin = CP[lead(tad) == 0][1],
         Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])
       ) %>%
       gather(exposure, value, Cmax, Cmin, Cavg) %>%
@@ -579,7 +579,7 @@ server <- function(input, output, session) {
       group_by(pop, trial, subj, ID, WT, AGE, BSA, WTC, AGEC, BSAC, ss2) %>%
       summarise(
         Cmax = max(CP),
-        Cmin = min(CP),
+        Cmin = CP[lead(tad) == 0][1],
         Cavg = (AUC[n()] - AUC[1]) / (time[n()] - time[1])
       ) %>%
       gather(exposure, value, Cmax, Cmin, Cavg) %>%
